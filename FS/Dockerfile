@@ -10,4 +10,4 @@ RUN pip install requests
 
 EXPOSE 8080
 
-CMD ["python", "US.py"]
+CMD ["python", "FS.py"]
