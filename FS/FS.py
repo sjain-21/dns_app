@@ -1,69 +1,68 @@
 from flask import Flask, request, jsonify
-import requests
 import socket
 
 app = Flask(__name__)
 
+registration_info = {}
+
+def fibonacci(n):
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+
+@app.route('/register', methods=['PUT'])
+def register_server():
+    try:
+        data = request.get_json()
+        hostname = data.get('hostname')
+        ip = data.get('ip')
+        as_ip = data.get('as_ip')
+        as_port = data.get('as_port')
+
+        if hostname and ip:
+            # Format hostname and IP according to the specified format
+            # formatted_hostname = "\n".join([f"NAME={segment}" for segment in hostname.split('.')])
+            formatted_hostname = f"NAME={hostname}"
+            formatted_ip = f"VALUE={ip}"
+            
+            # DNS message in the specified format
+            dns_message = f"TYPE=A\n{formatted_hostname}\n{formatted_ip}\nTTL=10"
+
+            # UDP server address and port for Authoritative Server (AS)
+            AS_IP = as_ip
+            AS_PORT = int(as_port)
+            
+            # Create a UDP socket and send registration request to AS
+            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udp_socket.sendto(dns_message.encode(), (AS_IP, AS_PORT))
+            response, address = udp_socket.recvfrom(1024)
+            print(response.decode())
+            udp_socket.close()
+
+            # Store registration information
+            registration_info['hostname'] = hostname
+            registration_info['ip'] = ip
+
+            return jsonify(message="Registration successful"), 201
+        else:
+            return jsonify(error="Bad Request: Missing Parameters"), 400
+    except Exception as e:
+        return jsonify(error="Internal Server Error"), 500
 
 @app.route('/fibonacci', methods=['GET'])
 def calculate_fibonacci():
-    hostname = request.args.get('hostname')
-    fs_port = request.args.get('fs_port')
-    number = request.args.get('number')
-    as_ip = request.args.get('as_ip')
-    as_port = request.args.get('as_port')
-
-    if hostname is None or fs_port is None or number is None or as_ip is None or as_port is None:
-        return jsonify(error="Bad Request: Missing Parameters"), 400
-
     try:
-        fs_port = int(fs_port)
-        number = int(number)
-        as_port = int(as_port)
-    except ValueError:
-        return jsonify(error="Bad Request: Invalid Port or Number"), 400
-
-    dns_query = f"TYPE=A\nNAME={hostname}"
-    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_socket.sendto(dns_query.encode(), (as_ip, as_port))
-    response, address = udp_socket.recvfrom(1024)
-    print(response.decode())
-    if response.decode() == "Record not found":
-        response_code = 404  
-        message = "DNS Record not found"
-        fibonacci_result = None
-    else:
-        udp_socket.close()
-        response_lines = response.decode().split('\n')
-        _, _, fs_ip, _ = response_lines[0], response_lines[1], response_lines[2], response_lines[3]
-        fs_ip = fs_ip.split("=")[1]
-        fs_server_url = f"http://{fs_ip}:{fs_port}/fibonacci?number={number}"
-        fs_response = requests.get(fs_server_url)
-
-        # print(fs_response)
-        # print(fs_response.status_code)
-        # print(fs_response.json())
-        message=""
-        if fs_response.status_code == 200:
-            fs_data = fs_response.json()
-            fibonacci_result = fs_data.get('fibonacci')
-            response_code = 200
-            message="success"
-        else:
-            fs_data = fs_response.json()
-            response_code = fs_response.status_code
-            fibonacci_result = None
-            message=fs_data.get('error')
-    
-
-    response_data = {
-        "response_code": response_code,
-        "fibonacci_result": fibonacci_result,
-        "response_message": message
-    }
-
-    return jsonify(response_data), 200
+        number = int(request.args.get('number'))
+        if number < 0:
+            raise ValueError
+        result = fibonacci(number)
+        return jsonify(fibonacci=result), 200
+    except (ValueError, TypeError):
+        return jsonify(error="Bad Request: Invalid Number Format"), 400
 
 app.run(host='0.0.0.0',
-        port=8080,
+        port=9090,
         debug=True)
