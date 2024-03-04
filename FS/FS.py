@@ -1,68 +1,49 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import socket
+import pickle
 
-app = Flask(__name__)
+server = Flask(__name__)
+DATA_SIZE = 1024
 
-registration_info = {}
+@server.route('/')
+def welcome_message():
+    return "Welcome to the Fibonacci Computation Server!"
 
-def fibonacci(n):
-    if n <= 1:
-        return n
-    a, b = 0, 1
-    for _ in range(2, n + 1):
-        a, b = b, a + b
-    return b
+def fibonacci_calculation(val):
+    if val < 0:
+        raise ValueError("Input should be non-negative")
+    elif val == 0:
+        return 0
+    elif val in [1, 2]:
+        return 1
+    return fibonacci_calculation(val - 1) + fibonacci_calculation(val - 2)
 
-@app.route('/register', methods=['PUT'])
+@server.route('/fibonacci')
+def compute_fibonacci():
+    num = int(request.args.get('number'))
+    return str(fibonacci_calculation(num))
+
+def send_registration_data(payload, address):
+    serialized_data = pickle.dumps(payload)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp_socket:
+        udp_socket.sendto(serialized_data, address)
+
+@server.route('/register', methods=['PUT'])
 def register_server():
-    try:
-        data = request.get_json()
-        hostname = data.get('hostname')
-        ip = data.get('ip')
-        as_ip = data.get('as_ip')
-        as_port = data.get('as_port')
+    details = request.json
+    if not details:
+        raise ValueError("No data provided in request")
+    
+    server_name = details["hostname"]
+    fib_server_ip = details["fs_ip"]
+    auth_server_ip = details["as_ip"]
+    auth_server_port = details["as_port"]
+    lifespan = details["ttl"]
 
-        if hostname and ip:
-            # Format hostname and IP according to the specified format
-            # formatted_hostname = "\n".join([f"NAME={segment}" for segment in hostname.split('.')])
-            formatted_hostname = f"NAME={hostname}"
-            formatted_ip = f"VALUE={ip}"
-            
-            # DNS message in the specified format
-            dns_message = f"TYPE=A\n{formatted_hostname}\n{formatted_ip}\nTTL=10"
+    data_to_send = ((server_name, fib_server_ip, "A", lifespan))
+    send_registration_data(data_to_send, (auth_server_ip, auth_server_port))
+    
+    return "Successfully Registered!"
 
-            # UDP server address and port for Authoritative Server (AS)
-            AS_IP = as_ip
-            AS_PORT = int(as_port)
-            
-            # Create a UDP socket and send registration request to AS
-            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            udp_socket.sendto(dns_message.encode(), (AS_IP, AS_PORT))
-            response, address = udp_socket.recvfrom(1024)
-            print(response.decode())
-            udp_socket.close()
-
-            # Store registration information
-            registration_info['hostname'] = hostname
-            registration_info['ip'] = ip
-
-            return jsonify(message="Registration successful"), 201
-        else:
-            return jsonify(error="Bad Request: Missing Parameters"), 400
-    except Exception as e:
-        return jsonify(error="Internal Server Error"), 500
-
-@app.route('/fibonacci', methods=['GET'])
-def calculate_fibonacci():
-    try:
-        number = int(request.args.get('number'))
-        if number < 0:
-            raise ValueError
-        result = fibonacci(number)
-        return jsonify(fibonacci=result), 200
-    except (ValueError, TypeError):
-        return jsonify(error="Bad Request: Invalid Number Format"), 400
-
-app.run(host='0.0.0.0',
-        port=9090,
-        debug=True)
+if __name__ == '__main__':
+    server.run(host='0.0.0.0', port=9090, debug=True)
