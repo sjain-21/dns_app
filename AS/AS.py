@@ -1,67 +1,70 @@
 import socket
 import json
+import time
+import os
+import logging as log_handler
 
-try:
-    with open("dns_records.json", "r") as file:
-        dns_records = json.load(file)
-except FileNotFoundError:
-    dns_records = []
+log_handler.basicConfig(format='[%(asctime)s %(filename)s:%(lineno)d] %(message)s',
+                        datefmt='%H:%M:%S',
+                        level=log_handler.DEBUG)
 
-AS_IP = "0.0.0.0"
-AS_PORT = 53533
+SERVER_ADDR = "0.0.0.0"
+BIND_PORT = 53533
+DATA_CHUNK = 1024
+DB_PATH = "/tmp/dns_records.json"
 
-udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-udp_socket.bind((AS_IP, AS_PORT))
+def init_server_socket():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind((SERVER_ADDR, BIND_PORT))
+    return s
 
-print("Authoritative Server (AS) is running on port 53533...")
+def load_dns_records():
+    if not os.path.isfile(DB_PATH):
+        with open(DB_PATH, "w") as f:
+            json.dump({}, f, indent=4)
+    with open(DB_PATH, "r") as f:
+        return json.load(f)
 
-while True:
-    data, address = udp_socket.recvfrom(1024)
+def save_dns_records(records):
+    with open(DB_PATH, "w") as f:
+        json.dump(records, f, indent=4)
 
-    message = data.decode().strip().splitlines()
-    # print(message)
-    if len(message) == 4 and message[0] == "TYPE=A":
-        type, name, value, ttl = message  
-
-        type = type.split("=")[1]
-        name = name.split("=")[1]
-        value = value.split("=")[1]
-        ttl = int(ttl.split("=")[1])
-
-        existing_record = next((record for record in dns_records if record["NAME"] == name), None)
-
-        if existing_record:
-            existing_record["TYPE"] = type
-            existing_record["VALUE"] = value
-            existing_record["TTL"] = ttl
-            print(f"Updated Record: {existing_record}")
+def handle_received_data(data):
+    if len(data) == 4:
+        domain, address, r_type, duration = data
+        records = load_dns_records()
+        expiration = time.time() + int(duration)
+        records[domain] = {"address": address, "type": r_type, "expiration": expiration}
+        save_dns_records(records)
+        return None
+    elif len(data) == 2:
+        query_type, queried_domain = data
+        records = load_dns_records()
+        if queried_domain not in records:
+            return None
         else:
-            record = {
-                "TYPE": type,
-                "NAME": name,
-                "VALUE": value,
-                "TTL": ttl
-            }
-            dns_records.append(record)
-            print(f"Registered: {record}")
-
-        with open("dns_records.json", "w") as file:
-            json.dump(dns_records, file, indent=4)  
-
-        response = "Registration successful".encode()
-        udp_socket.sendto(response, address)
-    elif len(message) == 2 and message[0] == "TYPE=A":
-        _, query_name = message
-        matching_records = [record for record in dns_records if record["NAME"] == query_name.split("=")[1]]
-        print(matching_records)
-        if matching_records:
-            response_record = matching_records[0]
-            response = f"TYPE={response_record['TYPE']}\nNAME={response_record['NAME']}\nVALUE={response_record['VALUE']}\nTTL={response_record['TTL']}".encode()
-            status_code=200
-        else:
-            response = "Record not found".encode()
-            status_code=200
-        udp_socket.sendto(response, address)
+            record = records[queried_domain]
+            if time.time() > record["expiration"]:
+                return None
+            return (record["type"], queried_domain, record["address"], record["expiration"] - time.time())
     else:
-        error_response = "Invalid request".encode()
-        udp_socket.sendto(error_response, address)
+        return f"Unexpected data length: {len(data)}"
+
+def run_server():
+    server_socket = init_server_socket()
+    log_handler.info(f"Server active on {SERVER_ADDR}:{BIND_PORT}")
+
+    while True:
+        byte_data, client_endpoint = server_socket.recvfrom(DATA_CHUNK)
+        data = json.loads(byte_data)
+        log_handler.debug(f"Received: {data}")
+        result = handle_received_data(data)
+        if result:
+            response = json.dumps(result).encode()
+        else:
+            response = b""
+        server_socket.sendto(response, client_endpoint)
+
+if __name__ == '__main__':
+    log_handler.debug("Initializing server...")
+    run_server()
