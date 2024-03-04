@@ -1,11 +1,21 @@
-FROM python:3.8-slim
+FROM python:3.10
 
-WORKDIR /app
 
-COPY AS.py /app/AS.py
+RUN apt-get update && apt-get clean -y && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-RUN pip install socket
 
-EXPOSE 53533/udp
+RUN groupadd -g 900 appgroup && useradd -r -u 1000 -g appgroup appuser
 
-CMD ["python", "AS.py"]
+
+WORKDIR /application
+
+COPY . .
+
+
+RUN pip install --no-cache-dir Flask==2.0.2
+
+
+USER appuser
+
+
+CMD [ "python3", "./AS.py" ]
