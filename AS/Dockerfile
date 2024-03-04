@@ -2,11 +2,10 @@ FROM python:3.8-slim
 
 WORKDIR /app
 
-COPY . /app
+COPY AS.py /app/AS.py
 
-RUN pip install Flask pytz requests
+RUN pip install socket
 
-# EXPOSE is optional and used for documentation purposes
 EXPOSE 53533/udp
 
 CMD ["python", "AS.py"]
