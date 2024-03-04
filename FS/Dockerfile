@@ -1,13 +1,15 @@
-FROM python:3.8-slim
+FROM python:3.10-slim
 
-WORKDIR /app
 
-COPY . /app
+WORKDIR /app-dir
 
-RUN pip install Flask
-RUN pip install pytz
-RUN pip install requests
 
-EXPOSE 8080
+COPY . /app-dir
 
-CMD ["python", "FS.py"]
+
+RUN pip install --no-cache-dir Flask==2.0.2
+
+EXPOSE 9090
+
+
+CMD ["python3", "FS.py"]
